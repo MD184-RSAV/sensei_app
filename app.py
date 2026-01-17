@@ -6,16 +6,8 @@ from PIL import Image
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵")
 
-# Look "App" propre
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {display:none;}
-    .reportview-container .main .block-container {padding-top: 1rem;}
-    </style>
-""", unsafe_allow_html=True)
+# Look "App"
+st.markdown("<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;} .stDeployButton {display:none;}</style>", unsafe_allow_html=True)
 
 # --- CONNEXION ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -23,6 +15,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Clé API manquante dans les Secrets.")
 
+# On utilise Gemini 3 Flash qui est performant mais on va limiter les appels
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 # Initialisation de la mémoire
@@ -33,36 +26,34 @@ if "texte_lu" not in st.session_state:
 
 st.title("🇯🇵 Mon Coach Japonais")
 
-# --- SECTION 1 : SCANNER ---
+# --- SECTION 1 : SCANNER (Optimisé) ---
 st.subheader("1. Ma Leçon")
 fichier = st.file_uploader("Photo du cours", type=['png', 'jpg', 'jpeg'])
 
 if fichier:
     img = Image.open(fichier)
+    # On n'affiche le bouton que si on n'a pas encore de texte pour économiser le quota
     if st.button("📷 Analyser l'image"):
         with st.spinner("Lecture du texte japonais..."):
             try:
-                # On demande explicitement Kanjis + Romaji
                 res = model.generate_content([
-                    "Tu es un expert en japonais. Extrais le texte de cette image. "
-                    "Affiche d'abord la version originale en Japonais (Kanjis/Kanas), "
-                    "puis juste en dessous la version en Rōmaji. Pas de français.", 
+                    "Tu es un expert en japonais. Extrais le texte. "
+                    "Affiche : 1. Japonais (Kanjis/Kanas) avec espaces. "
+                    "2. Romaji en dessous. Pas de français.", 
                     img
                 ])
                 st.session_state.texte_lu = res.text
                 st.success("Lecture terminée !")
             except Exception as e:
-                st.error(f"Erreur de lecture : {e}")
+                st.error("Quota atteint ou erreur. Attends 1 minute et réessaie.")
 
 if st.session_state.texte_lu:
-    # Mise en page soignée du texte extrait
-    st.markdown("### 📝 Texte de la leçon")
+    st.markdown("### 📝 Ma Leçon")
     st.info(st.session_state.texte_lu)
 
     # --- SECTION 2 : PRATIQUE ORALE ---
     st.divider()
     st.subheader("2. Pratique Orale")
-    st.write("Conseils en Français 🇫🇷 | Dialogue en Japonais 🇯🇵")
     
     audio = mic_recorder(start_prompt="🎤 Lire le texte", stop_prompt="🛑 Analyser mon accent", key='recorder_lecture')
 
@@ -70,22 +61,17 @@ if st.session_state.texte_lu:
         with st.spinner("Le Sensei écoute..."):
             try:
                 audio_part = {"mime_type": "audio/wav", "data": audio['bytes']}
-                prompt_accent = f"""
-                Analyse mon audio pour ce texte : '{st.session_state.texte_lu}'. 
-                1. Donne une note sur 10.
-                2. Donne des conseils de prononciation détaillés EN FRANÇAIS.
-                """
+                prompt_accent = f"Analyse mon audio pour ce texte : '{st.session_state.texte_lu}'. Note sur 10 et conseils EN FRANÇAIS."
                 feedback = model.generate_content([prompt_accent, audio_part])
-                st.markdown("#### 💡 Feedback du Sensei")
+                st.markdown("#### 💡 Feedback")
                 st.write(feedback.text)
-            except Exception as e:
-                st.error(f"Erreur analyse : {e}")
+            except:
+                st.warning("Trop de requêtes. Attends un instant avant de demander un nouveau feedback.")
 
-    # --- SECTION 3 : DIALOGUE D'IMMERSION ---
+    # --- SECTION 3 : DIALOGUE (Optimisé pour le quota) ---
     st.divider()
     st.subheader("3. Dialogue d'immersion")
     
-    # Affichage de l'historique
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
@@ -96,19 +82,15 @@ if st.session_state.texte_lu:
         with st.spinner("Le Sensei réfléchit..."):
             try:
                 audio_msg = {"mime_type": "audio/wav", "data": audio_chat['bytes']}
-                prompt_context = f"""
-                Tu es un prof de japonais. On discute autour de ce texte : {st.session_state.texte_lu}. 
-                Réponds brièvement à l'élève et pose une question simple.
-                RÈGLE : Pas de français. Uniquement Japonais (Kanjis/Kanas) + Rōmaji.
-                """
+                prompt_context = f"Tu es un prof de japonais. On parle de : {st.session_state.texte_lu}. Réponds brièvement en Japonais+Romaji uniquement. Pas de français."
                 
-                response = model.generate_content([prompt_context] + [msg["content"] for msg in st.session_state.chat_history] + [audio_msg])
+                response = model.generate_content([prompt_context] + [msg["content"] for msg in st.session_state.chat_history[-2:]] + [audio_msg])
                 
-                st.session_state.chat_history.append({"role": "user", "content": "🎤 (Message vocal)"})
+                st.session_state.chat_history.append({"role": "user", "content": "🎤 (Vocal)"})
                 st.session_state.chat_history.append({"role": "assistant", "content": response.text})
                 st.rerun()
-            except Exception as e:
-                st.error(f"Erreur dialogue : {e}")
+            except:
+                st.error("Le Sensei est fatigué (Quota épuisé). Réessaie dans quelques minutes.")
 
     if st.button("🔄 Nouveau dialogue"):
         st.session_state.chat_history = []
