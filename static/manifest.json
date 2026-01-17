@@ -7,7 +7,7 @@
   "theme_color": "#ff4b4b",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f1ef-1f1f5.png",
+      "src": "https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/1f1ef-1f1f5.png",
       "sizes": "72x72",
       "type": "image/png"
     },
