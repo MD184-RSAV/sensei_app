@@ -1,0 +1,15 @@
+{
+  "name": "Nihongo Coach",
+  "short_name": "Nihongo",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#ff4b4b",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/197/197604.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
