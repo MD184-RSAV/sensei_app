@@ -3,29 +3,32 @@ import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
 
-# --- CONFIGURATION DE L'INTERFACE ---
+# --- CONFIGURATION DE L'INTERFACE (LOOK APPLICATION) ---
 st.set_page_config(
     page_title="Nihongo Coach",
     page_icon="🇯🇵",
-    initial_sidebar_state="collapsed" # Cache la barre latérale pour faire "App"
+    initial_sidebar_state="collapsed"
 )
 
-# Masquer les menus Streamlit pour le look "Vraie App"
+# Style CSS pour masquer les éléments superflus de Streamlit
 hide_style = """
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    .stDeployButton {display:none;}
+    [data-testid="stHeader"] {background: rgba(0,0,0,0); height: 0rem;}
     </style>
 """
 st.markdown(hide_style, unsafe_allow_html=True)
 
-# Connexion sécurisée à Gemini
+# --- CONNEXION SÉCURISÉE À GEMINI ---
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     st.error("Clé API manquante dans les Secrets Streamlit.")
 
+# Utilisation du modèle 'flash-latest' pour une meilleure stabilité avec les images
 model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 st.title("🇯🇵 Mon Coach Japonais")
@@ -37,50 +40,61 @@ mode = st.tabs(["📷 Photo / Scan", "⌨️ Clavier"])
 texte_a_etudier = ""
 
 with mode[0]:
-    fichier = st.file_uploader("Scanner mon cours", type=['png', 'jpg', 'jpeg'])
+    fichier = st.file_uploader("Prendre une photo de mon cours", type=['png', 'jpg', 'jpeg'])
     if fichier:
         img = Image.open(fichier)
-        st.image(img, caption="Document scanné", width=300)
-        with st.spinner("Lecture du texte..."):
-            res = model.generate_content([
-                "Extrais le texte japonais ou romaji de cette image. Affiche-le proprement sans commentaires.", 
-                img
-            ])
-            texte_a_etudier = res.text
-            st.success("Texte extrait !")
+        st.image(img, caption="Document importé", width=300)
+        with st.spinner("L'IA analyse l'image..."):
+            try:
+                # Requête explicite pour l'extraction de texte
+                res = model.generate_content([
+                    "Tu es un expert en japonais. Extrais tout le texte japonais et romaji visible sur cette image. Ne donne QUE le texte, sans aucun commentaire en français.", 
+                    img
+                ])
+                if res.text:
+                    texte_a_etudier = res.text
+                    st.success("Texte extrait avec succès !")
+                else:
+                    st.warning("Aucun texte n'a été détecté sur l'image.")
+            except Exception as e:
+                st.error(f"Erreur lors de l'analyse : {e}")
 
 with mode[1]:
-    texte_manuel = st.text_area("Ou tape ton texte ici :", value=texte_a_etudier)
+    texte_manuel = st.text_area("Tape ou modifie ton texte ici :", value=texte_a_etudier, height=150)
     if texte_manuel:
         texte_a_etudier = texte_manuel
 
 # --- SECTION 2 : AFFICHAGE PÉDAGOGIQUE ---
 if texte_a_etudier:
-    with st.expander("👀 Voir le texte préparé", expanded=True):
-        with st.spinner("Formatage..."):
-            # On demande à Gemini de formater le texte pour l'étude
+    with st.expander("👀 Texte préparé pour l'étude", expanded=True):
+        with st.spinner("Mise en forme..."):
+            # On demande à Gemini de formater proprement
             format_res = model.generate_content(f"""
-                Prends ce texte : "{texte_a_etudier}"
-                Réécris-le avec :
-                1. Japonais (espacé)
-                2. Rōmaji juste en dessous
-                Pas de français.
+                Réécris ce texte japonais pour une lecture facile :
+                1. Une ligne en Japonais (ajoute des espaces entre les mots et les particules)
+                2. Une ligne en Rōmaji juste en dessous
+                Ne traduis pas en français.
+                Texte : "{texte_a_etudier}"
             """)
             st.markdown(format_res.text)
 
-    # --- SECTION 3 : ORAL ---
+    # --- SECTION 3 : PRATIQUE ORALE ---
     st.subheader("2. Pratique Orale")
-    st.write("Lis le texte à voix haute :")
+    st.write("Lis le texte ci-dessus à voix haute :")
     
+    # Enregistreur audio (ne coupe pas si tu fais des pauses)
     audio = mic_recorder(
         start_prompt="🎤 Commencer",
-        stop_prompt="🛑 Terminer",
+        stop_prompt="🛑 Terminer / Envoyer",
         key='recorder'
     )
 
     if audio:
         st.audio(audio['bytes'])
         with st.spinner("Analyse de ta prononciation..."):
-            # Ici on envoie l'audio à Gemini pour feedback
-            # Note: Pour l'instant on simule l'analyse textuelle
-            st.success("Analyse terminée ! Tes pauses étaient bonnes, attention au 'R' japonais.")
+            # Simulation de feedback (l'analyse audio directe par Gemini arrive progressivement)
+            st.info("💡 Conseil : Pour une voix plus naturelle, assure-toi de ne pas trop insister sur le 'u' final de 'desu'.")
+            
+            # Bouton pour lancer une petite discussion sur le thème
+            if st.button("💬 Discuter sur ce thème"):
+                st.write("L'IA va maintenant te poser une question simple en japonais...")
