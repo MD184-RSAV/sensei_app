@@ -72,4 +72,17 @@ if texte_final:
             st.write(texte_final)
 
     st.subheader("2. Pratique Orale")
-    mic_recorder(start_prompt="🎤 Parler", stop_prompt="🛑 Stop", key='recorder')
+    st.write("Appuie une fois pour démarrer, une fois pour finir :")
+    
+    # Version simplifiée du bouton pour mobile
+    audio = mic_recorder(
+        start_prompt="🎤 Commencer l'enregistrement",
+        stop_prompt="🛑 Arrêter et Envoyer",
+        just_once=False, # Permet de s'enregistrer plusieurs fois
+        key='recorder'
+    )
+
+    if audio:
+        # Affiche le lecteur audio pour vérifier que ça a marché
+        st.audio(audio['bytes'])
+        st.success("Audio capturé ! Écoute-toi pour comparer avec le texte.")
