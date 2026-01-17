@@ -8,7 +8,7 @@ import time
 st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵")
 st.markdown("<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;} .stDeployButton {display:none;} .block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
 
-# --- CONNEXION INTELLIGENTE ---
+# --- CONNEXION (AVEC CORRECTIF 404) ---
 def get_api_key():
     if "GEMINI_API_KEY_2" in st.secrets: return st.secrets["GEMINI_API_KEY_2"]
     if "GEMINI_API_KEY" in st.secrets: return st.secrets["GEMINI_API_KEY"]
@@ -19,115 +19,112 @@ if not key:
     st.error("⚠️ Clé API manquante.")
     st.stop()
 
-genai.configure(api_key=key)
-model = genai.GenerativeModel('gemini-3-flash-preview')
+# L'option transport='rest' est la clé pour éviter les erreurs 404 sur Gemini 1.5
+genai.configure(api_key=key, transport='rest')
 
-# --- CERVEAU ANTI-CRASH ---
-def ask_ai_smartly(prompt_content):
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            return model.generate_content(prompt_content)
-        except Exception as e:
-            if attempt == max_retries - 1:
-                st.error(f"Le Sensei est KO : {e}")
-                return None
-            wait_time = (attempt + 1) * 5
-            st.toast(f"⏳ Trafic dense... Pause de {wait_time}s", icon="🍵")
-            time.sleep(wait_time)
-    return None
+# --- LES DEUX CERVEAUX ---
+# 1. Le Scanner (Gemini 3) : Puissant mais capricieux (Quota limité)
+model_scan = genai.GenerativeModel('gemini-3-flash-preview')
+
+# 2. Le Bavard (Gemini 1.5) : Robuste et endurant (Pour le chat et l'audio)
+model_chat = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- MÉMOIRE ---
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 if "texte_lu" not in st.session_state: st.session_state.texte_lu = ""
-# NOUVEAU : État pour savoir si la conversation est finie
 if "conversation_active" not in st.session_state: st.session_state.conversation_active = True
 
 st.title("🇯🇵 Mon Coach Japonais")
 
-# --- 1. SCANNER ---
+# --- 1. SCANNER (Utilise Gemini 3) ---
 st.subheader("1. Ma Leçon")
 fichier = st.file_uploader("Photo du cours", type=['png', 'jpg', 'jpeg'])
 
 if fichier:
     img = Image.open(fichier)
+    # Bouton protégé : on ne re-clique pas si on a déjà le texte
     if st.button("📷 Analyser l'image", disabled=(st.session_state.texte_lu != "")):
-        with st.spinner("Lecture..."):
-            res = ask_ai_smartly([
-                "Extrais le texte. Format : Japonais (Kanji/Kana) en haut, Romaji en dessous. Pas de français.", 
-                img
-            ])
-            if res:
+        with st.spinner("Lecture experte (Gemini 3)..."):
+            try:
+                res = model_scan.generate_content([
+                    "Extrais le texte. Format OBLIGATOIRE : Japonais (Kanji/Kana) en haut, Romaji en dessous. Pas de français.", 
+                    img
+                ])
                 st.session_state.texte_lu = res.text
-                st.session_state.chat_history = [] # On reset le chat si on scanne un nouveau texte
+                st.session_state.chat_history = []
                 st.session_state.conversation_active = True
                 st.rerun()
+            except Exception as e:
+                st.error(f"Le Scanner est fatigué (Quota). Attends 1 min. ({e})")
 
 if st.session_state.texte_lu:
     st.info(st.session_state.texte_lu)
 
-    # --- 2. PRATIQUE ORALE ---
+    # --- 2. PRATIQUE ORALE (Utilise Gemini 1.5) ---
     st.divider()
     st.subheader("2. Pratique Orale")
     audio = mic_recorder(start_prompt="🎤 Lire le texte", stop_prompt="🛑 Stop", key='lecture')
     
     if audio:
-        with st.spinner("Analyse..."):
-            prompt = f"Analyse cet audio pour le texte : '{st.session_state.texte_lu}'. Note /10 et donne 2 conseils précis en FRANÇAIS."
-            res = ask_ai_smartly([prompt, {'mime_type': 'audio/wav', 'data': audio['bytes']}])
-            if res:
+        with st.spinner("Analyse de l'accent (Gemini 1.5)..."):
+            try:
+                prompt = f"Analyse cet audio pour le texte : '{st.session_state.texte_lu}'. Note /10 et donne 2 conseils précis en FRANÇAIS."
+                # On utilise model_chat ici pour économiser le quota du scanner
+                res = model_chat.generate_content([prompt, {'mime_type': 'audio/wav', 'data': audio['bytes']}])
                 st.markdown("### 💡 Feedback")
                 st.write(res.text)
+            except Exception as e:
+                st.warning(f"Erreur audio : {e}")
 
-    # --- 3. DIALOGUE D'IMMERSION ---
+    # --- 3. DIALOGUE D'IMMERSION (Utilise Gemini 1.5) ---
     st.divider()
     st.subheader("3. Discussion avec Nakamura")
     
-    # Affichage de l'historique
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # Zone de contrôle de la conversation
     if st.session_state.conversation_active:
-        col1, col2 = st.columns([3, 1]) # Colonnes pour aligner les boutons
+        col1, col2 = st.columns([3, 1])
         
         with col1:
-            st.write("À toi de répondre :")
             audio_chat = mic_recorder(start_prompt="🎤 Parler", stop_prompt="🛑 Envoyer", key='chat')
         
         with col2:
             st.write("Option :")
-            if st.button("🏁 Terminer"):
-                with st.spinner("Nakamura vous salue..."):
-                    # On demande à l'IA de dire au revoir
-                    prompt_bye = f"Le contexte était : {st.session_state.texte_lu}. L'utilisateur doit partir. Dis-lui au revoir chaleureusement en Japonais + Romaji."
-                    res_bye = ask_ai_smartly([prompt_bye])
-                    if res_bye:
+            if st.button("🏁 Finir"):
+                with st.spinner("Sayonara..."):
+                    try:
+                        prompt_bye = f"Contexte: {st.session_state.texte_lu}. Dis au revoir poliment en Japonais + Romaji."
+                        res_bye = model_chat.generate_content(prompt_bye)
                         st.session_state.chat_history.append({"role": "assistant", "content": res_bye.text})
-                        st.session_state.conversation_active = False # On désactive le micro
+                        st.session_state.conversation_active = False
+                        st.rerun()
+                    except:
+                        st.session_state.conversation_active = False
                         st.rerun()
 
-        # Logique de réponse audio standard
         if audio_chat:
             with st.spinner("Nakamura t'écoute..."):
-                prompt_roleplay = f"""
-                CONTEXTE : JEU DE RÔLE. Tu ES Nakamura. SUJET : "{st.session_state.texte_lu}".
-                ACTION : Réponds naturellement. Question courte.
-                RÈGLES : Japonais + Romaji uniquement. Pas de français.
-                """
-                history_content = [msg["content"] for msg in st.session_state.chat_history[-4:]]
-                res = ask_ai_smartly([prompt_roleplay] + history_content + [{'mime_type': 'audio/wav', 'data': audio_chat['bytes']}])
-                
-                if res:
+                try:
+                    prompt_roleplay = f"""
+                    RÔLE : Tu es Nakamura. SUJET : "{st.session_state.texte_lu}".
+                    ACTION : Réponds à l'audio, sois naturel, pose une question courte.
+                    RÈGLES : Japonais + Romaji. Zéro français.
+                    """
+                    history_content = [msg["content"] for msg in st.session_state.chat_history[-4:]]
+                    # On utilise model_chat ici aussi !
+                    res = model_chat.generate_content([prompt_roleplay] + history_content + [{'mime_type': 'audio/wav', 'data': audio_chat['bytes']}])
+                    
                     st.session_state.chat_history.append({"role": "user", "content": "🎤 (Ta réponse)"})
                     st.session_state.chat_history.append({"role": "assistant", "content": res.text})
                     st.rerun()
-    
+                except Exception as e:
+                    st.error(f"Erreur connexion : {e}")
+
     else:
-        # Si la conversation est finie
-        st.success("Conversation terminée ! Otsukaresama desu ! (Beau travail !)")
-        if st.button("🔄 Recommencer une discussion"):
+        st.success("Conversation terminée ! 🎌")
+        if st.button("🔄 Recommencer"):
             st.session_state.chat_history = []
             st.session_state.conversation_active = True
             st.rerun()
