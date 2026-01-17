@@ -5,7 +5,7 @@ from PIL import Image
 import json
 import os
 
-# --- CONFIGURATION & STYLE ---
+# --- 1. CONFIGURATION & STYLE ---
 st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵", layout="wide")
 st.markdown("""
     <style>
@@ -16,7 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 1. GESTION DES CLÉS & MODÈLES (ROULETTE) ---
+# --- 2. GESTION DES CLÉS API ---
 def get_api_key():
     if "GEMINI_API_KEY_2" in st.secrets: return st.secrets["GEMINI_API_KEY_2"]
     if "GEMINI_API_KEY" in st.secrets: return st.secrets["GEMINI_API_KEY"]
@@ -24,45 +24,74 @@ def get_api_key():
 
 key = get_api_key()
 if not key:
-    st.error("⚠️ Clé API introuvable.")
+    st.error("⚠️ Clé API introuvable. Vérifie tes 'Secrets' Streamlit.")
     st.stop()
 
+# Configuration 'REST' pour éviter les erreurs 404 sur mobile
 genai.configure(api_key=key, transport='rest')
 
-def get_model():
-    # On teste plusieurs modèles pour éviter les blocages
-    models = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash-exp']
-    for m in models:
+# --- 3. LA ROULETTE DES MODÈLES (CRITIQUE) ---
+def find_working_model():
+    # Liste élargie : On teste tout le monde pour trouver un survivant !
+    candidate_models = [
+        'gemini-1.5-flash',       # Le standard
+        'gemini-1.5-flash-8b',    # Le rapide
+        'gemini-1.5-pro',         # Le puissant (souvent un quota différent)
+        'gemini-2.0-flash-exp',   # Le nouveau
+        'gemini-3-flash-preview'  # La roue de secours ultime
+    ]
+    
+    for m in candidate_models:
         try:
             model = genai.GenerativeModel(m)
+            # Test invisible d'1 token pour vérifier si la porte s'ouvre
             model.generate_content("test", generation_config={"max_output_tokens": 1})
-            return model
-        except: continue
-    return None
+            return model, m # On renvoie le modèle et son nom
+        except:
+            continue # Si ça plante, au suivant !
+            
+    return None, None
 
+# Initialisation du modèle (une seule fois)
 if "cached_model" not in st.session_state:
-    st.session_state.cached_model = get_model()
+    with st.spinner("Connexion au cerveau de l'IA..."):
+        model_instance, model_name = find_working_model()
+        st.session_state.cached_model = model_instance
+        st.session_state.model_name = model_name
+
 model = st.session_state.cached_model
 
-# --- 2. SYSTÈME DE SAUVEGARDE (JSON) ---
+# --- 4. SAFETY CHECK (ANTI-CRASH) ---
+# Si après avoir tout testé, 'model' est toujours vide, on arrête proprement.
+if model is None:
+    st.error("🚫 Tous les serveurs Google sont actuellement saturés ou indisponibles pour ta clé.")
+    st.info("💡 Solution : Attends 1 ou 2 minutes, puis rafraîchis la page (Menu > Rerun).")
+    st.stop() # Arrêt immédiat du script ici. Plus d'erreur rouge 'NoneType'.
+else:
+    # Petit indicateur discret en bas à droite
+    st.toast(f"Connecté à : {st.session_state.model_name}", icon="🟢")
+
+
+# --- 5. SYSTÈME DE SAUVEGARDE (JSON) ---
 VOCAB_FILE = "vocabulaire.json"
 
 def load_vocab():
     if os.path.exists(VOCAB_FILE):
-        with open(VOCAB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(VOCAB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: return [] # Si fichier corrompu, on renvoie vide
     return []
 
 def save_vocab(new_list):
     with open(VOCAB_FILE, "w", encoding="utf-8") as f:
         json.dump(new_list, f, ensure_ascii=False, indent=4)
 
-# Chargement au démarrage
 if "vocab_list" not in st.session_state:
     st.session_state.vocab_list = load_vocab()
 
 
-# --- 3. PAGE : PRONONCIATION ---
+# --- PAGE 1 : PRONONCIATION ---
 def page_prononciation():
     st.header("🗣️ Atelier Prononciation")
     st.caption("Scanne un texte, lis-le, et reçois un feedback immédiat.")
@@ -74,13 +103,13 @@ def page_prononciation():
     if fichier:
         img = Image.open(fichier)
         if st.button("📷 Analyser le texte"):
-            with st.spinner("Lecture..."):
+            with st.spinner(f"Lecture avec {st.session_state.model_name}..."):
                 try:
-                    res = model.generate_content(["Extrais le texte japonais exact.", img])
+                    res = model.generate_content(["Extrais le texte japonais exact de cette image. Texte brut uniquement.", img])
                     st.session_state.scan_prononciation = res.text
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erreur : {e}")
+                    st.error(f"Erreur de lecture : {e}")
 
     # Étape 2 : L'Exercice
     if st.session_state.scan_prononciation:
@@ -100,32 +129,34 @@ def page_prononciation():
                 except Exception as e:
                     st.warning(f"Erreur audio : {e}")
 
-# --- 4. PAGE : VOCABULAIRE ---
+
+# --- PAGE 2 : VOCABULAIRE ---
 def page_vocabulaire():
     st.header("📚 Mon Vocabulaire & Flashcards")
     st.caption(f"Tu as actuellement **{len(st.session_state.vocab_list)} cartes** dans ta collection.")
 
-    # Onglets pour organiser cette page
+    # Onglets
     tab1, tab2, tab3 = st.tabs(["➕ Ajouter (Scan)", "✍️ Ajouter (Manuel)", "🧠 Réviser"])
 
     # --- ONGLET 1 : SCAN PHOTO ---
     with tab1:
-        st.write("Prends en photo une liste de vocabulaire de ton manuel.")
+        st.write("Prends en photo une liste de vocabulaire.")
         fichier_vocab = st.file_uploader("Photo de la liste", type=['png', 'jpg', 'jpeg'], key="uploader_vocab")
         
         if fichier_vocab:
             img_vocab = Image.open(fichier_vocab)
-            if st.button("✨ Générer les cartes depuis la photo"):
+            if st.button("✨ Générer les cartes"):
                 with st.spinner("Extraction magique..."):
                     try:
-                        # Prompt spécial JSON pour créer les cartes
+                        # Prompt strict pour avoir du JSON
                         prompt = """
-                        Analyse cette image. Extrais TOUS les mots de vocabulaire visibles.
+                        Analyse cette image. Extrais les mots de vocabulaire.
                         Pour chaque mot, crée un objet JSON :
-                        {"jap": "Mot en Kanji", "kana": "Lecture Kana", "fr": "Traduction"}
-                        Renvoie UNIQUEMENT une liste JSON stricte.
+                        {"jap": "Mot Kanji", "kana": "Lecture", "fr": "Traduction"}
+                        Renvoie UNIQUEMENT une liste JSON stricte. Pas de markdown.
                         """
                         res = model.generate_content([prompt, img_vocab])
+                        # Nettoyage
                         clean_json = res.text.replace("```json", "").replace("```", "").strip()
                         new_words = json.loads(clean_json)
                         
@@ -141,19 +172,23 @@ def page_vocabulaire():
     with tab2:
         with st.form("ajout_manuel"):
             col1, col2 = st.columns(2)
-            mot_jap = col1.text_input("Japonais (Kanji/Kana)")
+            mot_jap = col1.text_input("Japonais (Kanji ou Kana)")
             mot_fr = col2.text_input("Français")
             submitted = st.form_submit_button("Ajouter la carte")
             
             if submitted and mot_jap and mot_fr:
-                # On demande à l'IA de compléter le Kana manquant
-                res_kana = model.generate_content(f"Donne juste la lecture en Hiragana/Katakana de : {mot_jap}")
-                nouvelle_carte = {"jap": mot_jap, "kana": res_kana.text.strip(), "fr": mot_fr}
-                
-                st.session_state.vocab_list.append(nouvelle_carte)
-                save_vocab(st.session_state.vocab_list)
-                st.success(f"Carte '{mot_jap}' ajoutée !")
-                st.rerun()
+                with st.spinner("Ajout des Kanas..."):
+                    try:
+                        # L'IA complète les kanas manquants
+                        res_kana = model.generate_content(f"Donne juste la lecture en Hiragana/Katakana de : {mot_jap}")
+                        nouvelle_carte = {"jap": mot_jap, "kana": res_kana.text.strip(), "fr": mot_fr}
+                        
+                        st.session_state.vocab_list.append(nouvelle_carte)
+                        save_vocab(st.session_state.vocab_list)
+                        st.success(f"Carte '{mot_jap}' ajoutée !")
+                        st.rerun()
+                    except:
+                        st.error("Erreur de connexion.")
 
     # --- ONGLET 3 : RÉVISION ---
     with tab3:
@@ -173,24 +208,27 @@ def page_vocabulaire():
                         - 🇫🇷 {carte.get('fr', '')}
                         """)
             
-            if st.button("🗑️ Tout effacer (Attention !)"):
+            st.write("---")
+            if st.button("🗑️ Tout effacer"):
                 st.session_state.vocab_list = []
                 save_vocab([])
                 st.rerun()
 
-# --- 5. MENU DE NAVIGATION (SIDEBAR) ---
+
+# --- MENU DE NAVIGATION ---
 with st.sidebar:
     st.title("🇯🇵 Nihongo Coach")
     st.write("---")
     choice = st.radio("Menu", ["Prononciation", "Vocabulaire"])
     
     st.write("---")
-    st.caption("Version 2.0 - Multi-pages")
-    # Petit indicateur de statut du modèle
-    if "cached_model" in st.session_state:
-        st.success("IA Connectée 🟢")
+    # Indicateur d'état du modèle
+    if "model_name" in st.session_state:
+        st.caption(f"🚀 Moteur : {st.session_state.model_name}")
+    else:
+        st.caption("🔴 Non connecté")
 
-# --- 6. ROUTAGE ---
+# --- ROUTAGE ---
 if choice == "Prononciation":
     page_prononciation()
 elif choice == "Vocabulaire":
