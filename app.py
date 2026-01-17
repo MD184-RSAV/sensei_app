@@ -26,7 +26,7 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Clé API manquante dans les Secrets Streamlit.")
 
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 st.title("🇯🇵 Mon Coach Japonais")
 
