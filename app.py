@@ -3,14 +3,14 @@ import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
 
-# --- CONFIGURATION LOOK "APP" ---
+# --- CONFIGURATION INTERFACE ---
 st.set_page_config(
     page_title="Nihongo Coach",
-    page_icon="🇯🇵", # Forcer l'icône ici
+    page_icon="🇯🇵",
     initial_sidebar_state="collapsed"
 )
 
-# Masquage des menus Streamlit
+# Look "Vraie App"
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -22,67 +22,83 @@ st.markdown("""
 
 # --- CONNEXION GEMINI ---
 if "GEMINI_API_KEY" in st.secrets:
-    # On initialise avec le modèle testé dans ton Playground
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("Clé manquante dans Secrets")
+    st.error("Clé API manquante dans les Secrets Streamlit.")
 
-# MODÈLE EXACT DE TON TEST RÉUSSI
+# ON UTILISE LA VERSION 3 COMME DANS TON TEST RÉUSSI
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 st.title("🇯🇵 Mon Coach Japonais")
 
-# --- SECTION 1 : IMPORT DU COURS ---
+# --- SECTION 1 : LE SCANNER ---
 st.subheader("1. Ma Leçon")
-mode = st.tabs(["📷 Scanner", "⌨️ Saisir"])
+fichier = st.file_uploader("Prends ton cours en photo", type=['png', 'jpg', 'jpeg'])
 
-texte_final = ""
+# On utilise la session_state pour garder le texte en mémoire
+if "texte_lu" not in st.session_state:
+    st.session_state.texte_lu = ""
 
-with mode[0]:
-    fichier = st.file_uploader("Capture de ton cours", type=['png', 'jpg', 'jpeg'])
-    if fichier:
-        img = Image.open(fichier)
-        st.image(img, width=300)
-        if st.button("Lancer l'analyse"):
-            with st.spinner("L'IA lit ta photo..."):
-                try:
-                    # Utilisation de la méthode Gemini 3
-                    response = model.generate_content([
-                        "Extrais tout le texte japonais et romaji de cette image. Texte brut uniquement.", 
-                        img
-                    ])
-                    st.session_state.texte_lu = response.text
-                    st.success("Lecture terminée !")
-                except Exception as e:
-                    st.error(f"Erreur : {e}")
+if fichier:
+    img = Image.open(fichier)
+    if st.button("📷 Lancer l'analyse de l'image"):
+        with st.spinner("Lecture par l'IA..."):
+            try:
+                # Extraction du texte
+                res = model.generate_content([
+                    "Tu es un expert en japonais. Extrais tout le texte japonais et romaji de cette image. Texte brut uniquement.", 
+                    img
+                ])
+                st.session_state.texte_lu = res.text
+                st.success("Image lue !")
+            except Exception as e:
+                st.error(f"Erreur scan : {e}")
 
-    if "texte_lu" in st.session_state:
-        texte_final = st.session_state.texte_lu
-
-with mode[1]:
-    texte_final = st.text_area("Texte à pratiquer :", value=texte_final, height=150)
-
-# --- SECTION 2 : ÉTUDE ET ORAL ---
-if texte_final:
-    with st.expander("📖 Lecture préparée (Japonais / Romaji)", expanded=True):
-        try:
-            format_res = model.generate_content(f"Réécris ce texte avec une ligne en Japonais (espaces entre les mots) et une ligne en Rōmaji : {texte_final}")
-            st.markdown(format_res.text)
-        except:
-            st.write(texte_final)
-
-    st.subheader("2. Pratique Orale")
-    st.write("Appuie une fois pour démarrer, une fois pour finir :")
+# Affichage du texte et guide de lecture
+if st.session_state.texte_lu:
+    texte_final = st.text_area("Texte détecté :", value=st.session_state.texte_lu, height=100)
     
-    # Version simplifiée du bouton pour mobile
+    with st.expander("📖 Guide de lecture (Japonais / Romaji)", expanded=True):
+        if "guide" not in st.session_state or st.button("Mettre à jour le guide"):
+            res_guide = model.generate_content(f"Réécris ce texte avec une ligne Japonais (espaces) et une ligne Romaji en dessous : {texte_final}")
+            st.session_state.guide = res_guide.text
+        st.markdown(st.session_state.guide)
+
+    # --- SECTION 2 : ANALYSE ORALE ---
+    st.divider()
+    st.subheader("2. Pratique Orale")
+    st.write("Enregistre-toi en lisant le texte ci-dessus :")
+    
     audio = mic_recorder(
-        start_prompt="🎤 Commencer l'enregistrement",
-        stop_prompt="🛑 Arrêter et Envoyer",
-        just_once=False, # Permet de s'enregistrer plusieurs fois
+        start_prompt="🎤 Parler", 
+        stop_prompt="🛑 Stop & Analyser mon accent", 
         key='recorder'
     )
 
     if audio:
-        # Affiche le lecteur audio pour vérifier que ça a marché
         st.audio(audio['bytes'])
-        st.success("Audio capturé ! Écoute-toi pour comparer avec le texte.")
+        with st.spinner("Le Sensei écoute ta voix..."):
+            try:
+                # Envoi de l'audio à Gemini 3 pour feedback
+                audio_part = {"mime_type": "audio/wav", "data": audio['bytes']}
+                prompt = f"""
+                Analyse mon audio par rapport à ce texte : "{texte_final}".
+                1. Donne une note de prononciation sur 10.
+                2. Dis-moi quels mots j'ai bien prononcé et où je dois m'améliorer.
+                3. Donne-moi un conseil pour sonner plus comme un Japonais.
+                Réponds de façon sympa en français.
+                """
+                feedback = model.generate_content([prompt, audio_part])
+                
+                st.markdown("### 📝 Feedback du Sensei")
+                st.write(feedback.text)
+                
+            except Exception as e:
+                st.error(f"L'IA n'a pas pu analyser l'audio : {e}")
+
+    # --- SECTION 3 : CONVERSATION ---
+    st.divider()
+    if st.button("💬 Lancer une discussion sur ce thème"):
+        with st.spinner("Préparation..."):
+            conv = model.generate_content(f"En te basant sur ce texte : {texte_final}, pose-moi une question simple en japonais (avec Romaji) pour démarrer une conversation.")
+            st.info(conv.text)
