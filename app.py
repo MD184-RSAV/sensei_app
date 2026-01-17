@@ -3,16 +3,11 @@ import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
 
-# --- CONFIGURATION LOOK "APP" & LOGO ---
-st.set_page_config(
-    page_title="Nihongo Coach",
-    page_icon="🇯🇵",
-    initial_sidebar_state="collapsed"
-)
+# --- CONFIGURATION LOOK "APP" ---
+st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵", initial_sidebar_state="collapsed")
 
-# Injection de code pour forcer le manifest et le look
+# Masquage des éléments Streamlit
 st.markdown("""
-    <link rel="manifest" href="/static/manifest.json">
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -23,11 +18,12 @@ st.markdown("""
 
 # --- CONNEXION GEMINI ---
 if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    # On force l'utilisation de la version stable v1 de l'API pour éviter l'erreur 404
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"], transport='rest')
 else:
     st.error("Clé API manquante dans les Secrets !")
 
-# NOM DU MODÈLE CORRIGÉ (Version stable uniquement)
+# Utilisation du nom de modèle le plus simple possible
 MODEL_NAME = 'gemini-1.5-flash'
 model = genai.GenerativeModel(MODEL_NAME)
 
@@ -46,30 +42,31 @@ with mode[0]:
         if st.button("Scanner l'image"):
             with st.spinner("Analyse en cours..."):
                 try:
-                    # Utilisation d'une syntaxe plus simple pour l'envoi
-                    response = model.generate_content([
-                        "Agis comme un OCR expert en japonais. Extrais tout le texte japonais et romaji de cette image. Ne donne que le texte brut.",
-                        img
-                    ])
+                    # On utilise une méthode de génération plus directe
+                    response = model.generate_content(
+                        contents=["Extrais le texte japonais et romaji de cette image. Texte brut uniquement.", img]
+                    )
                     if response.text:
                         st.session_state.texte_extrait = response.text
                         st.success("Texte extrait !")
                 except Exception as e:
-                    st.error(f"Erreur : {e}")
-                    st.info("Conseil : Vérifie que ta clé API est bien active sur Google AI Studio.")
+                    st.error(f"Erreur technique : {e}")
+                    st.info("Vérifie que ta clé API n'a pas de restriction de sécurité sur Google Cloud Console.")
 
     if "texte_extrait" in st.session_state:
         texte_a_etudier = st.session_state.texte_extrait
 
 with mode[1]:
+    # On permet la modification manuelle du texte extrait
     texte_manuel = st.text_area("Texte à pratiquer :", value=texte_a_etudier, height=150)
     texte_a_etudier = texte_manuel
 
 # --- SECTION 2 : ÉTUDE ET ORAL ---
 if texte_a_etudier:
     with st.expander("📖 Lecture préparée", expanded=True):
-        with st.spinner("Mise en forme..."):
+        with st.spinner("Mise en forme pédagogique..."):
             try:
+                # Formatage en double ligne Japonais / Romaji
                 format_res = model.generate_content(f"Réécris ce texte avec une ligne en Japonais (espaces entre les mots) et une ligne en Rōmaji en dessous. Pas de français : {texte_a_etudier}")
                 st.markdown(format_res.text)
             except:
