@@ -3,15 +3,16 @@ import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
 
-# --- CONFIGURATION LOOK "APP" ---
+# --- CONFIGURATION LOOK "APP" & LOGO ---
 st.set_page_config(
-    page_title="Nihongo Coach", 
-    page_icon="🇯🇵", 
+    page_title="Nihongo Coach",
+    page_icon="🇯🇵",
     initial_sidebar_state="collapsed"
 )
 
-# Masquage des éléments Streamlit
+# Injection de code pour forcer le manifest et le look
 st.markdown("""
+    <link rel="manifest" href="/static/manifest.json">
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -24,39 +25,39 @@ st.markdown("""
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("Configure ta clé API dans les Secrets de Streamlit !")
+    st.error("Clé API manquante dans les Secrets !")
 
-# Changement ici : On utilise 'models/gemini-1.5-flash-latest' pour plus de compatibilité
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+# NOM DU MODÈLE CORRIGÉ (Version stable uniquement)
+MODEL_NAME = 'gemini-1.5-flash'
+model = genai.GenerativeModel(MODEL_NAME)
 
 st.title("🇯🇵 Nihongo Coach")
 
-# --- SECTION 1 : ENTRÉE DU TEXTE ---
+# --- SECTION 1 : IMPORT DU COURS ---
 st.subheader("1. Ma Leçon")
 mode = st.tabs(["📷 Scanner", "⌨️ Saisir"])
 texte_a_etudier = ""
 
 with mode[0]:
-    fichier = st.file_uploader("Prends ton cours en photo", type=['png', 'jpg', 'jpeg'])
+    fichier = st.file_uploader("Capture de ton cours", type=['png', 'jpg', 'jpeg'])
     if fichier:
         img = Image.open(fichier)
         st.image(img, width=300)
         if st.button("Scanner l'image"):
-            with st.spinner("L'IA analyse la photo..."):
+            with st.spinner("Analyse en cours..."):
                 try:
-                    # Envoi structuré : texte + image
+                    # Utilisation d'une syntaxe plus simple pour l'envoi
                     response = model.generate_content([
-                        "Extrais tout le texte japonais et romaji de cette image. Ne donne que le texte brut, sans commentaires.",
+                        "Agis comme un OCR expert en japonais. Extrais tout le texte japonais et romaji de cette image. Ne donne que le texte brut.",
                         img
                     ])
                     if response.text:
-                        # On stocke le résultat dans la session pour qu'il reste affiché
                         st.session_state.texte_extrait = response.text
                         st.success("Texte extrait !")
                 except Exception as e:
-                    st.error(f"Erreur d'IA : {e}")
+                    st.error(f"Erreur : {e}")
+                    st.info("Conseil : Vérifie que ta clé API est bien active sur Google AI Studio.")
 
-    # Récupération du texte extrait si disponible
     if "texte_extrait" in st.session_state:
         texte_a_etudier = st.session_state.texte_extrait
 
@@ -67,13 +68,16 @@ with mode[1]:
 # --- SECTION 2 : ÉTUDE ET ORAL ---
 if texte_a_etudier:
     with st.expander("📖 Lecture préparée", expanded=True):
-        with st.spinner("Formatage..."):
-            format_res = model.generate_content(f"Réécris ce texte avec une ligne en Japonais (espaces entre les mots) et une ligne en Rōmaji en dessous. Pas de français : {texte_a_etudier}")
-            st.markdown(format_res.text)
+        with st.spinner("Mise en forme..."):
+            try:
+                format_res = model.generate_content(f"Réécris ce texte avec une ligne en Japonais (espaces entre les mots) et une ligne en Rōmaji en dessous. Pas de français : {texte_a_etudier}")
+                st.markdown(format_res.text)
+            except:
+                st.write(texte_a_etudier)
 
     st.subheader("2. Pratique Orale")
     audio = mic_recorder(start_prompt="🎤 Parler", stop_prompt="🛑 Stop", key='recorder')
 
     if audio:
         st.audio(audio['bytes'])
-        st.info("💡 Prononciation reçue !")
+        st.success("Prononciation enregistrée !")
