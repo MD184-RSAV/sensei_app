@@ -3,18 +3,22 @@ import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
 
-# --- CONFIG LOOK "APP" ---
-st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵", initial_sidebar_state="collapsed")
+# --- CONFIGURATION LOOK "APP" ---
+st.set_page_config(
+    page_title="Nihongo Coach", 
+    page_icon="🇯🇵", 
+    initial_sidebar_state="collapsed"
+)
 
-hide_style = """
+# Masquage des éléments Streamlit
+st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .stDeployButton {display:none;}
     </style>
-"""
-st.markdown(hide_style, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # --- CONNEXION GEMINI ---
 if "GEMINI_API_KEY" in st.secrets:
@@ -22,8 +26,8 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("Configure ta clé API dans les Secrets de Streamlit !")
 
-# Utilisation de la version la plus stable pour l'analyse d'images
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Changement ici : On utilise 'models/gemini-1.5-flash-latest' pour plus de compatibilité
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 st.title("🇯🇵 Nihongo Coach")
 
@@ -38,22 +42,27 @@ with mode[0]:
         img = Image.open(fichier)
         st.image(img, width=300)
         if st.button("Scanner l'image"):
-            with st.spinner("L'IA lit ton cours..."):
+            with st.spinner("L'IA analyse la photo..."):
                 try:
-                    # On envoie l'image à Gemini
-                    res = model.generate_content([
-                        "Extrais tout le texte japonais et romaji de cette image. Ne donne que le texte brut.", 
+                    # Envoi structuré : texte + image
+                    response = model.generate_content([
+                        "Extrais tout le texte japonais et romaji de cette image. Ne donne que le texte brut, sans commentaires.",
                         img
                     ])
-                    texte_a_etudier = res.text
-                    st.success("Texte extrait !")
+                    if response.text:
+                        # On stocke le résultat dans la session pour qu'il reste affiché
+                        st.session_state.texte_extrait = response.text
+                        st.success("Texte extrait !")
                 except Exception as e:
-                    st.error(f"Erreur technique : {e}")
+                    st.error(f"Erreur d'IA : {e}")
+
+    # Récupération du texte extrait si disponible
+    if "texte_extrait" in st.session_state:
+        texte_a_etudier = st.session_state.texte_extrait
 
 with mode[1]:
     texte_manuel = st.text_area("Texte à pratiquer :", value=texte_a_etudier, height=150)
-    if texte_manuel:
-        texte_a_etudier = texte_manuel
+    texte_a_etudier = texte_manuel
 
 # --- SECTION 2 : ÉTUDE ET ORAL ---
 if texte_a_etudier:
@@ -67,15 +76,4 @@ if texte_a_etudier:
 
     if audio:
         st.audio(audio['bytes'])
-        st.info("💡 Prononciation reçue ! (Analyse audio bientôt disponible)")
-
-    # --- SECTION 3 : FLASHCARDS (Bêta) ---
-    st.divider()
-    if st.button("🗂️ Créer des Flashcards de cette leçon"):
-        with st.spinner("Génération du vocabulaire..."):
-            flash_res = model.generate_content(f"Extrais les 5 mots les plus importants de ce texte et donne leur traduction en français sous forme de liste Mot : Définition. Texte : {texte_a_etudier}")
-            st.session_state.flashcards = flash_res.text
-    
-    if "flashcards" in st.session_state:
-        st.subheader("Vocabulaire à retenir")
-        st.reply(st.session_state.flashcards)
+        st.info("💡 Prononciation reçue !")
