@@ -3,102 +3,89 @@ import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
 
-# --- CONFIGURATION INTERFACE ---
-st.set_page_config(
-    page_title="Nihongo Coach",
-    page_icon="🇯🇵",
-    initial_sidebar_state="collapsed"
-)
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵")
 
-# Look "Vraie App"
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {display:none;}
-    </style>
-""", unsafe_allow_html=True)
+# Masquage Streamlit
+st.markdown("<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;} .stDeployButton {display:none;}</style>", unsafe_allow_html=True)
 
-# --- CONNEXION GEMINI ---
+# --- CONNEXION ---
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("Clé API manquante dans les Secrets Streamlit.")
+    st.error("Clé API manquante dans les Secrets.")
 
-# ON UTILISE LA VERSION 3 COMME DANS TON TEST RÉUSSI
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-st.title("🇯🇵 Mon Coach Japonais")
-
-# --- SECTION 1 : LE SCANNER ---
-st.subheader("1. Ma Leçon")
-fichier = st.file_uploader("Prends ton cours en photo", type=['png', 'jpg', 'jpeg'])
-
-# On utilise la session_state pour garder le texte en mémoire
+# Initialisation de la mémoire
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 if "texte_lu" not in st.session_state:
     st.session_state.texte_lu = ""
 
+st.title("🇯🇵 Mon Coach Japonais")
+
+# --- SECTION 1 : SCANNER ---
+st.subheader("1. Ma Leçon")
+fichier = st.file_uploader("Photo du cours", type=['png', 'jpg', 'jpeg'])
+
 if fichier:
     img = Image.open(fichier)
-    if st.button("📷 Lancer l'analyse de l'image"):
-        with st.spinner("Lecture par l'IA..."):
-            try:
-                # Extraction du texte
-                res = model.generate_content([
-                    "Tu es un expert en japonais. Extrais tout le texte japonais et romaji de cette image. Texte brut uniquement.", 
-                    img
-                ])
-                st.session_state.texte_lu = res.text
-                st.success("Image lue !")
-            except Exception as e:
-                st.error(f"Erreur scan : {e}")
+    if st.button("📷 Analyser l'image"):
+        with st.spinner("Lecture..."):
+            res = model.generate_content(["Extrais le texte japonais/romaji de cette image.", img])
+            st.session_state.texte_lu = res.text
 
-# Affichage du texte et guide de lecture
 if st.session_state.texte_lu:
-    texte_final = st.text_area("Texte détecté :", value=st.session_state.texte_lu, height=100)
-    
-    with st.expander("📖 Guide de lecture (Japonais / Romaji)", expanded=True):
-        if "guide" not in st.session_state or st.button("Mettre à jour le guide"):
-            res_guide = model.generate_content(f"Réécris ce texte avec une ligne Japonais (espaces) et une ligne Romaji en dessous : {texte_final}")
-            st.session_state.guide = res_guide.text
-        st.markdown(st.session_state.guide)
+    with st.expander("📖 Voir le texte extrait", expanded=False):
+        st.write(st.session_state.texte_lu)
 
-    # --- SECTION 2 : ANALYSE ORALE ---
-    st.divider()
+    # --- SECTION 2 : ANALYSE ORALE (AVEC CONSEILS EN FRANÇAIS) ---
     st.subheader("2. Pratique Orale")
-    st.write("Enregistre-toi en lisant le texte ci-dessus :")
-    
-    audio = mic_recorder(
-        start_prompt="🎤 Parler", 
-        stop_prompt="🛑 Stop & Analyser mon accent", 
-        key='recorder'
-    )
+    audio = mic_recorder(start_prompt="🎤 Lire le texte", stop_prompt="🛑 Analyser mon accent", key='recorder_lecture')
 
     if audio:
-        st.audio(audio['bytes'])
-        with st.spinner("Le Sensei écoute ta voix..."):
-            try:
-                # Envoi de l'audio à Gemini 3 pour feedback
-                audio_part = {"mime_type": "audio/wav", "data": audio['bytes']}
-                prompt = f"""
-                Analyse mon audio par rapport à ce texte : "{texte_final}".
-                1. Donne une note de prononciation sur 10.
-                2. Dis-moi quels mots j'ai bien prononcé et où je dois m'améliorer.
-                3. Donne-moi un conseil pour sonner plus comme un Japonais.
-                Réponds de façon sympa en français.
-                """
-                feedback = model.generate_content([prompt, audio_part])
-                
-                st.markdown("### 📝 Feedback du Sensei")
-                st.write(feedback.text)
-                
-            except Exception as e:
-                st.error(f"L'IA n'a pas pu analyser l'audio : {e}")
+        with st.spinner("Analyse du Sensei..."):
+            audio_part = {"mime_type": "audio/wav", "data": audio['bytes']}
+            # Ici, on autorise le français pour la pédagogie
+            prompt_accent = f"""
+            Analyse mon audio pour ce texte : '{st.session_state.texte_lu}'. 
+            1. Donne une note sur 10.
+            2. Donne des conseils de prononciation détaillés EN FRANÇAIS pour m'aider à m'améliorer.
+            """
+            feedback = model.generate_content([prompt_accent, audio_part])
+            st.info(feedback.text)
 
-    # --- SECTION 3 : CONVERSATION ---
+    # --- SECTION 3 : DIALOGUE INTERACTIF (IMMERSION JAPONAIS/ROMAJI) ---
     st.divider()
-    if st.button("💬 Lancer une discussion sur ce thème"):
-        with st.spinner("Préparation..."):
-            conv = model.generate_content(f"En te basant sur ce texte : {texte_final}, pose-moi une question simple en japonais (avec Romaji) pour démarrer une conversation.")
-            st.info(conv.text)
+    st.subheader("3. Dialogue d'immersion")
+    st.write("Ici, le Sensei ne parle que japonais !")
+    
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    audio_chat = mic_recorder(start_prompt="🎤 Répondre au Sensei", stop_prompt="🛑 Envoyer", key='recorder_chat')
+
+    if audio_chat:
+        with st.spinner("Le Sensei réfléchit..."):
+            audio_msg = {"mime_type": "audio/wav", "data": audio_chat['bytes']}
+            
+            # Ici, interdiction du français pour le flux de conversation
+            prompt_context = f"""
+            Tu es un prof de japonais. On discute autour de ce texte : {st.session_state.texte_lu}. 
+            Réponds à l'élève et pose-lui une question simple.
+            RÈGLE : Interdiction d'utiliser le français. 
+            Réponds uniquement en Japonais (Kanji/Kana) avec le Rōmaji juste en dessous.
+            """
+            
+            response = model.generate_content([prompt_context] + [msg["content"] for msg in st.session_state.chat_history] + [audio_msg])
+            
+            st.session_state.chat_history.append({"role": "user", "content": "🎤 (Message vocal)"})
+            st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+            
+            st.rerun()
+
+    if st.button("🔄 Nouveau dialogue"):
+        st.session_state.chat_history = []
+        st.rerun()
