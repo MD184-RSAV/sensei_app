@@ -7,7 +7,12 @@
   "theme_color": "#ff4b4b",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/197/197604.png",
+      "src": "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f1ef-1f1f5.png",
+      "sizes": "72x72",
+      "type": "image/png"
+    },
+    {
+      "src": "https://raw.githubusercontent.com/twitter/twemoji/master/assets/512x512/1f1ef-1f1f5.png",
       "sizes": "512x512",
       "type": "image/png"
     }
