@@ -1,235 +1,102 @@
 import streamlit as st
-import google.generativeai as genai
+from openai import OpenAI
 from streamlit_mic_recorder import mic_recorder
 from PIL import Image
-import json
-import os
+import io
+import base64
 
-# --- 1. CONFIGURATION & STYLE ---
-st.set_page_config(page_title="Nihongo Coach", page_icon="🇯🇵", layout="wide")
-st.markdown("""
-    <style>
-    .stDeployButton {display:none;} 
-    .block-container {padding-top: 1rem;}
-    /* Style pour les cartes */
-    .stExpander {border: 1px solid #e0e0e0; border-radius: 10px; margin-bottom: 10px;}
-    </style>
-""", unsafe_allow_html=True)
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Nihongo Speak", page_icon="🗣️")
+st.markdown("<style>.stDeployButton {display:none;} .block-container {padding-top: 1rem;}</style>", unsafe_allow_html=True)
 
-# --- 2. GESTION DES CLÉS API ---
-def get_api_key():
-    if "GEMINI_API_KEY_2" in st.secrets: return st.secrets["GEMINI_API_KEY_2"]
-    if "GEMINI_API_KEY" in st.secrets: return st.secrets["GEMINI_API_KEY"]
-    return None
-
-key = get_api_key()
-if not key:
-    st.error("⚠️ Clé API introuvable. Vérifie tes 'Secrets' Streamlit.")
+# --- CONNEXION OPENAI ---
+if "OPENAI_API_KEY" not in st.secrets:
+    st.error("⚠️ Clé OpenAI manquante dans les Secrets.")
     st.stop()
 
-# Configuration 'REST' pour éviter les erreurs 404 sur mobile
-genai.configure(api_key=key, transport='rest')
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- 3. LA ROULETTE DES MODÈLES (CRITIQUE) ---
-def find_working_model():
-    # Liste élargie : On teste tout le monde pour trouver un survivant !
-    candidate_models = [
-        'gemini-1.5-flash',       # Le standard
-        'gemini-1.5-flash-8b',    # Le rapide
-        'gemini-1.5-pro',         # Le puissant (souvent un quota différent)
-        'gemini-2.0-flash-exp',   # Le nouveau
-        'gemini-3-flash-preview'  # La roue de secours ultime
-    ]
+# --- FONCTIONS UTILES ---
+def encode_image(image_file):
+    return base64.b64encode(image_file.read()).decode('utf-8')
+
+# --- INTERFACE ---
+st.title("🗣️ Nihongo Speak")
+st.write("Scanne ton texte et pratique ta prononciation avec GPT-4o.")
+
+if "current_text" not in st.session_state:
+    st.session_state.current_text = ""
+
+# --- 1. LE SCANNER ---
+with st.expander("📷 Étape 1 : Scanner mon texte", expanded=(st.session_state.current_text == "")):
+    uploaded_file = st.file_uploader("Prends ton manuel en photo", type=['png', 'jpg', 'jpeg'])
     
-    for m in candidate_models:
-        try:
-            model = genai.GenerativeModel(m)
-            # Test invisible d'1 token pour vérifier si la porte s'ouvre
-            model.generate_content("test", generation_config={"max_output_tokens": 1})
-            return model, m # On renvoie le modèle et son nom
-        except:
-            continue # Si ça plante, au suivant !
-            
-    return None, None
-
-# Initialisation du modèle (une seule fois)
-if "cached_model" not in st.session_state:
-    with st.spinner("Connexion au cerveau de l'IA..."):
-        model_instance, model_name = find_working_model()
-        st.session_state.cached_model = model_instance
-        st.session_state.model_name = model_name
-
-model = st.session_state.cached_model
-
-# --- 4. SAFETY CHECK (ANTI-CRASH) ---
-# Si après avoir tout testé, 'model' est toujours vide, on arrête proprement.
-if model is None:
-    st.error("🚫 Tous les serveurs Google sont actuellement saturés ou indisponibles pour ta clé.")
-    st.info("💡 Solution : Attends 1 ou 2 minutes, puis rafraîchis la page (Menu > Rerun).")
-    st.stop() # Arrêt immédiat du script ici. Plus d'erreur rouge 'NoneType'.
-else:
-    # Petit indicateur discret en bas à droite
-    st.toast(f"Connecté à : {st.session_state.model_name}", icon="🟢")
-
-
-# --- 5. SYSTÈME DE SAUVEGARDE (JSON) ---
-VOCAB_FILE = "vocabulaire.json"
-
-def load_vocab():
-    if os.path.exists(VOCAB_FILE):
-        try:
-            with open(VOCAB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except: return [] # Si fichier corrompu, on renvoie vide
-    return []
-
-def save_vocab(new_list):
-    with open(VOCAB_FILE, "w", encoding="utf-8") as f:
-        json.dump(new_list, f, ensure_ascii=False, indent=4)
-
-if "vocab_list" not in st.session_state:
-    st.session_state.vocab_list = load_vocab()
-
-
-# --- PAGE 1 : PRONONCIATION ---
-def page_prononciation():
-    st.header("🗣️ Atelier Prononciation")
-    st.caption("Scanne un texte, lis-le, et reçois un feedback immédiat.")
-
-    if "scan_prononciation" not in st.session_state: st.session_state.scan_prononciation = ""
-
-    # Étape 1 : Le Scan
-    fichier = st.file_uploader("1. Photo du texte à lire", type=['png', 'jpg', 'jpeg'], key="uploader_pron")
-    if fichier:
-        img = Image.open(fichier)
-        if st.button("📷 Analyser le texte"):
-            with st.spinner(f"Lecture avec {st.session_state.model_name}..."):
-                try:
-                    res = model.generate_content(["Extrais le texte japonais exact de cette image. Texte brut uniquement.", img])
-                    st.session_state.scan_prononciation = res.text
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erreur de lecture : {e}")
-
-    # Étape 2 : L'Exercice
-    if st.session_state.scan_prononciation:
-        st.info(st.session_state.scan_prononciation)
-        
-        st.write("---")
-        st.write("👇 **Enregistre ta lecture :**")
-        audio = mic_recorder(start_prompt="🎤 Commencer", stop_prompt="🛑 Stop", key='recorder_pron')
-        
-        if audio:
-            with st.spinner("Le Sensei analyse ton accent..."):
-                try:
-                    prompt = f"Analyse cet audio par rapport au texte : '{st.session_state.scan_prononciation}'. Note /10 et donne 3 conseils précis en français."
-                    res = model.generate_content([prompt, {'mime_type': 'audio/wav', 'data': audio['bytes']}])
-                    st.success("Analyse terminée !")
-                    st.markdown(res.text)
-                except Exception as e:
-                    st.warning(f"Erreur audio : {e}")
-
-
-# --- PAGE 2 : VOCABULAIRE ---
-def page_vocabulaire():
-    st.header("📚 Mon Vocabulaire & Flashcards")
-    st.caption(f"Tu as actuellement **{len(st.session_state.vocab_list)} cartes** dans ta collection.")
-
-    # Onglets
-    tab1, tab2, tab3 = st.tabs(["➕ Ajouter (Scan)", "✍️ Ajouter (Manuel)", "🧠 Réviser"])
-
-    # --- ONGLET 1 : SCAN PHOTO ---
-    with tab1:
-        st.write("Prends en photo une liste de vocabulaire.")
-        fichier_vocab = st.file_uploader("Photo de la liste", type=['png', 'jpg', 'jpeg'], key="uploader_vocab")
-        
-        if fichier_vocab:
-            img_vocab = Image.open(fichier_vocab)
-            if st.button("✨ Générer les cartes"):
-                with st.spinner("Extraction magique..."):
-                    try:
-                        # Prompt strict pour avoir du JSON
-                        prompt = """
-                        Analyse cette image. Extrais les mots de vocabulaire.
-                        Pour chaque mot, crée un objet JSON :
-                        {"jap": "Mot Kanji", "kana": "Lecture", "fr": "Traduction"}
-                        Renvoie UNIQUEMENT une liste JSON stricte. Pas de markdown.
-                        """
-                        res = model.generate_content([prompt, img_vocab])
-                        # Nettoyage
-                        clean_json = res.text.replace("```json", "").replace("```", "").strip()
-                        new_words = json.loads(clean_json)
-                        
-                        # Ajout et sauvegarde
-                        st.session_state.vocab_list.extend(new_words)
-                        save_vocab(st.session_state.vocab_list)
-                        st.success(f"✅ {len(new_words)} mots ajoutés !")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur d'extraction : {e}")
-
-    # --- ONGLET 2 : AJOUT MANUEL ---
-    with tab2:
-        with st.form("ajout_manuel"):
-            col1, col2 = st.columns(2)
-            mot_jap = col1.text_input("Japonais (Kanji ou Kana)")
-            mot_fr = col2.text_input("Français")
-            submitted = st.form_submit_button("Ajouter la carte")
-            
-            if submitted and mot_jap and mot_fr:
-                with st.spinner("Ajout des Kanas..."):
-                    try:
-                        # L'IA complète les kanas manquants
-                        res_kana = model.generate_content(f"Donne juste la lecture en Hiragana/Katakana de : {mot_jap}")
-                        nouvelle_carte = {"jap": mot_jap, "kana": res_kana.text.strip(), "fr": mot_fr}
-                        
-                        st.session_state.vocab_list.append(nouvelle_carte)
-                        save_vocab(st.session_state.vocab_list)
-                        st.success(f"Carte '{mot_jap}' ajoutée !")
-                        st.rerun()
-                    except:
-                        st.error("Erreur de connexion.")
-
-    # --- ONGLET 3 : RÉVISION ---
-    with tab3:
-        if not st.session_state.vocab_list:
-            st.info("Ta liste est vide. Ajoute des mots d'abord !")
-        else:
-            st.write("Clique sur une carte pour voir la réponse.")
-            # Affichage grille
-            cols = st.columns(2)
-            for i, carte in enumerate(st.session_state.vocab_list):
-                col = cols[i % 2]
-                with col:
-                    # L'expander sert de carte recto-verso
-                    with st.expander(f"🇯🇵 **{carte.get('jap', '???')}**"):
-                        st.markdown(f"""
-                        - 🗣️ **{carte.get('kana', '')}**
-                        - 🇫🇷 {carte.get('fr', '')}
-                        """)
-            
-            st.write("---")
-            if st.button("🗑️ Tout effacer"):
-                st.session_state.vocab_list = []
-                save_vocab([])
+    if uploaded_file and st.button("Lire l'image"):
+        with st.spinner("Analyse par GPT-4o..."):
+            try:
+                base64_image = encode_image(uploaded_file)
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Extrais le texte japonais de cette image. Affiche le texte en Kanji/Kana, puis une transcription en Romaji juste en dessous de chaque phrase. Pas de français."},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                            ],
+                        }
+                    ],
+                )
+                st.session_state.current_text = response.choices[0].message.content
                 st.rerun()
+            except Exception as e:
+                st.error(f"Erreur : {e}")
 
-
-# --- MENU DE NAVIGATION ---
-with st.sidebar:
-    st.title("🇯🇵 Nihongo Coach")
-    st.write("---")
-    choice = st.radio("Menu", ["Prononciation", "Vocabulaire"])
+# --- 2. LA PRATIQUE ---
+if st.session_state.current_text:
+    st.subheader("📖 Texte à pratiquer")
+    st.info(st.session_state.current_text)
     
-    st.write("---")
-    # Indicateur d'état du modèle
-    if "model_name" in st.session_state:
-        st.caption(f"🚀 Moteur : {st.session_state.model_name}")
-    else:
-        st.caption("🔴 Non connecté")
+    st.divider()
+    st.subheader("🎤 Étape 2 : S'enregistrer")
+    st.write("Lis le texte à voix haute :")
+    
+    audio = mic_recorder(
+        start_prompt="🔴 Commencer l'enregistrement",
+        stop_prompt="⏹️ Arrêter",
+        key='recorder'
+    )
 
-# --- ROUTAGE ---
-if choice == "Prononciation":
-    page_prononciation()
-elif choice == "Vocabulaire":
-    page_vocabulaire()
+    if audio:
+        with st.spinner("Analyse de ta prononciation..."):
+            try:
+                # 1. Transcription de ton audio via Whisper
+                audio_bio = io.BytesIO(audio['bytes'])
+                audio_bio.name = "audio.wav"
+                
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_bio,
+                    language="ja"
+                )
+                
+                st.write(f"**Ce que l'IA a entendu :** {transcript.text}")
+                
+                # 2. Feedback avec GPT-4o
+                feedback_response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "Tu es un sensei de japonais bienveillant."},
+                        {"role": "user", "content": f"Le texte cible était : {st.session_state.current_text}. L'élève a dit : {transcript.text}. Donne une note de prononciation sur 10 et 2 conseils courts en français pour s'améliorer."}
+                    ]
+                )
+                
+                st.markdown("### 💡 Feedback du Sensei")
+                st.write(feedback_response.choices[0].message.content)
+                
+            except Exception as e:
+                st.error(f"Erreur lors de l'analyse audio : {e}")
+
+    if st.button("🧹 Effacer et recommencer"):
+        st.session_state.current_text = ""
+        st.rerun()
